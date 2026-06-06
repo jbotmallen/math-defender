@@ -6,7 +6,7 @@ export interface GameOptions {
   level: number;
   audioSettings: AudioSettings;
   onWaveComplete: (options: string[]) => void;
-  onGameOver: (stars: number) => void;
+  onGameOver: (stars: number, didWin: boolean) => void;
   onScoreUpdate: (score: number) => void;
 }
 

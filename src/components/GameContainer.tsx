@@ -4,30 +4,99 @@ import { RotateCcw, LogOut, X } from 'lucide-react';
 import { createGameConfig } from '../games/config';
 import { type AudioSettings } from '../settings';
 import CardDraftModal from './CardDraftModal';
+import ResultsScreen from './ResultsScreen';
+import { fadeAudio } from '../audio/fade';
+import { playSfx } from '../audio/sfx';
+
+const GAMEBOARD_BGM_SRC = '/gameboard_bgm.ogg';
+const GAMEBOARD_BGM_MAX_VOLUME = 0.4; // sits under SFX; scaled by masterVolume
 
 interface GameContainerProps {
   level: number;
+  maxLevel: number;
   unlockedCards: string[];
   audioSettings: AudioSettings;
-  onReturnToHub: (earnedStars: number) => void;
+  onCommitResult: (earnedStars: number, didWin: boolean) => void;
+  onReturnToHub: () => void;
+  onStartLevel: (level: number) => void;
 }
 
 // `unlockedCards` is accepted but not yet consumed by the scene (draft pool is still hard-coded).
-const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onReturnToHub }) => {
+const GameContainer: React.FC<GameContainerProps> = ({
+  level,
+  maxLevel,
+  audioSettings,
+  onCommitResult,
+  onReturnToHub,
+  onStartLevel,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const gameRef = useRef<Game | null>(null);
   const audioSettingsRef = useRef(audioSettings);
-  
+
   // State for overlay UI driven by Phaser events
   const [showDraftModal, setShowDraftModal] = useState(false);
   const [draftOptions, setDraftOptions] = useState<string[]>([]);
   const [score, setScore] = useState(0);
+  // Latest score, readable synchronously from the Phaser onGameOver callback.
+  const scoreRef = useRef(0);
   const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  // End-of-run results overlay. `null` while the level is in progress.
+  const [result, setResult] = useState<{ stars: number; didWin: boolean; score: number } | null>(null);
   // Bumping this nonce tears down and rebuilds the Phaser game = restart the level.
   const [restartNonce, setRestartNonce] = useState(0);
 
   const [scorePopups, setScorePopups] = useState<{ id: number; text: string }[]>([]);
   const prevScoreRef = useRef(0);
+
+  // Gameboard background music: loops with fade in on mount, fade out on unmount.
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+  const bgmFadeRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bgmTarget = audioSettings.muted ? 0 : GAMEBOARD_BGM_MAX_VOLUME * audioSettings.masterVolume;
+  const bgmTargetRef = useRef(bgmTarget);
+
+  useEffect(() => {
+    const audio = new Audio(GAMEBOARD_BGM_SRC);
+    audio.loop = true;
+    audio.volume = 0;
+    bgmRef.current = audio;
+
+    const startFadeIn = () => {
+      if (bgmFadeRef.current) clearInterval(bgmFadeRef.current);
+      bgmFadeRef.current = fadeAudio(audio, bgmTargetRef.current, 1200);
+    };
+    // The level is entered via a button gesture, so autoplay should be allowed;
+    // retry once on the next interaction just in case.
+    let detachGesture: (() => void) | null = null;
+    audio.play().then(startFadeIn).catch(() => {
+      const onGesture = () => {
+        audio.play().then(startFadeIn).catch(() => {});
+        detachGesture?.();
+      };
+      window.addEventListener('pointerdown', onGesture, { once: true });
+      window.addEventListener('keydown', onGesture, { once: true });
+      detachGesture = () => {
+        window.removeEventListener('pointerdown', onGesture);
+        window.removeEventListener('keydown', onGesture);
+      };
+    });
+
+    return () => {
+      detachGesture?.();
+      if (bgmFadeRef.current) clearInterval(bgmFadeRef.current);
+      fadeAudio(audio, 0, 600, true);
+      bgmRef.current = null;
+    };
+  }, []);
+
+  // Live mute / master-volume changes fade the music to the new target.
+  useEffect(() => {
+    bgmTargetRef.current = bgmTarget;
+    const audio = bgmRef.current;
+    if (!audio || audio.paused) return;
+    if (bgmFadeRef.current) clearInterval(bgmFadeRef.current);
+    bgmFadeRef.current = fadeAudio(audio, bgmTarget, 350);
+  }, [bgmTarget]);
 
   useEffect(() => {
     if (score > prevScoreRef.current) {
@@ -52,10 +121,13 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
         setDraftOptions(options);
         setShowDraftModal(true);
       },
-      onGameOver: (stars: number) => {
-        onReturnToHub(stars);
+      onGameOver: (stars: number, didWin: boolean) => {
+        // Show the results overlay and bank rewards once; buttons handle navigation.
+        setResult({ stars, didWin, score: scoreRef.current });
+        onCommitResult(stars, didWin);
       },
       onScoreUpdate: (newScore: number) => {
+        scoreRef.current = newScore;
         setScore(newScore);
       }
     });
@@ -68,7 +140,7 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
         gameRef.current = null;
       }
     };
-  }, [level, onReturnToHub, restartNonce]);
+  }, [level, onCommitResult, restartNonce]);
 
   useEffect(() => {
     audioSettingsRef.current = audioSettings;
@@ -76,6 +148,7 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
   }, [audioSettings]);
 
   const handleCardSelected = (card: string) => {
+    playSfx('confirm');
     setShowDraftModal(false);
     // Send event back to phaser
     if (gameRef.current) {
@@ -87,23 +160,29 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
   // Quit flow: opening the confirm dialog pauses the running scene so the battle
   // doesn't advance behind the prompt; cancelling resumes it.
   const openQuitConfirm = () => {
+    playSfx('click');
     setShowQuitConfirm(true);
     gameRef.current?.scene.pause('SpaceGridScene');
   };
   const cancelQuit = () => {
+    playSfx('back');
     setShowQuitConfirm(false);
     gameRef.current?.scene.resume('SpaceGridScene');
   };
   const confirmQuit = () => {
+    playSfx('confirm');
     setShowQuitConfirm(false);
-    onReturnToHub(0);
+    onReturnToHub();
   };
 
   // Restart: rebuild the Phaser game from scratch and reset overlay state.
   const handleRestart = () => {
+    playSfx('click');
     setShowQuitConfirm(false);
     setShowDraftModal(false);
+    setResult(null);
     setScore(0);
+    scoreRef.current = 0;
     prevScoreRef.current = 0;
     setScorePopups([]);
     setRestartNonce((n) => n + 1);
@@ -116,7 +195,7 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
 
       {/* Rotate prompt: the board is landscape, so on small portrait screens ask the
           player to turn the device. Hidden on desktop (md+) and in landscape. */}
-      <div className="hidden max-md:portrait:flex absolute inset-0 z-[60] flex-col justify-center items-center gap-4 bg-[#05080f]/95 text-center px-8">
+      <div className="hidden max-md:portrait:flex absolute inset-0 z-60 flex-col justify-center items-center gap-4 bg-[#05080f]/95 text-center px-8">
         <RotateCcw className="text-[#00ffff] animate-pulse" size={56} />
         <p className="glow-text text-[#00ffff] text-xl font-bold">Rotate your device</p>
         <p className="text-slate-400 text-sm max-w-xs">
@@ -161,7 +240,7 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
 
       {/* Quit confirmation dialog */}
       {showQuitConfirm && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/70">
+        <div className="absolute inset-0 z-70 flex items-center justify-center bg-black/70">
           <div className="glass-panel flex flex-col items-center gap-5 px-8 py-7 max-w-sm text-center">
             <h2 className="glow-text text-[#00ffff] text-2xl font-bold">Quit level?</h2>
             <p className="text-slate-300 text-sm">
@@ -187,11 +266,24 @@ const GameContainer: React.FC<GameContainerProps> = ({ level, audioSettings, onR
         </div>
       )}
 
+      {/* End-of-run results screen */}
+      {result && (
+        <ResultsScreen
+          score={result.score}
+          stars={result.stars}
+          didWin={result.didWin}
+          canAdvance={result.didWin && level < maxLevel}
+          onRestart={handleRestart}
+          onHub={onReturnToHub}
+          onNext={() => onStartLevel(level + 1)}
+        />
+      )}
+
       {/* Draft Modal */}
       {showDraftModal && (
-        <CardDraftModal 
-          options={draftOptions} 
-          onSelect={handleCardSelected} 
+        <CardDraftModal
+          options={draftOptions}
+          onSelect={handleCardSelected}
         />
       )}
     </div>

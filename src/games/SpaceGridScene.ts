@@ -73,8 +73,8 @@ export default class SpaceGridScene extends Phaser.Scene {
     // sizes are 2x the on-screen footprint for crisp retina scaling.
     this.load.image('turret', 'assets/sprites/turret.png');
     this.load.svg('projectile', 'assets/sprites/projectile.svg', { width: 28, height: 28 });
-    this.load.svg('asteroid', 'assets/sprites/asteroid.svg', { width: 80, height: 80 });
-    this.load.svg('asteroidShield', 'assets/sprites/asteroid-shield.svg', { width: 88, height: 88 });
+    this.load.image('asteroid', 'assets/sprites/asteroid.png');
+    this.load.image('asteroidShield', 'assets/sprites/asteroid-shield.png');
     this.load.svg('gridTile', 'assets/sprites/grid-tile.svg', { width: 180, height: 160 });
 
     // Operator plant platforms (custom PNG art, one per operator family).
@@ -82,7 +82,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.load.image('plantSub', 'assets/sprites/plant-sub.png');
     this.load.image('plantMul', 'assets/sprites/plant-mul.png');
     this.load.image('plantDiv', 'assets/sprites/plant-div.png');
-    this.load.svg('droneBarrier', 'assets/sprites/drone-barrier.svg', { width: 72, height: 72 });
+    this.load.image('base', 'assets/sprites/base.png');
   }
 
   create() {
@@ -96,8 +96,11 @@ export default class SpaceGridScene extends Phaser.Scene {
     // Moving galaxy backdrop (drifting nebula + parallax starfield). Renders behind all play pieces.
     this.createGalaxyBackground(W, H);
 
-    // Left base zone
-    this.add.rectangle(this.playLeft / 2, H / 2, this.playLeft - 12, H - 20, 0x22d3ee, 0.06)
+    // Left base zone: PNG station art, narrower than the zone, keeping the neon outline.
+    const baseW = this.playLeft - 20;
+    const baseX = baseW / 2 + 2;
+    this.add.image(baseX, H / 2, 'base').setDisplaySize(baseW, H - 20).setDepth(-2);
+    this.add.rectangle(baseX, H / 2, baseW, H - 20, 0x22d3ee, 0)
       .setStrokeStyle(2, 0x22d3ee, 0.5);
     this.add.text(this.playLeft / 2, 14, 'BASE', { fontSize: '14px', color: '#22d3ee', fontStyle: 'bold' })
       .setOrigin(0.5, 0);
@@ -236,7 +239,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     const stars = this.baseHp >= 5 ? 3 : this.baseHp >= 3 ? 2 : 1;
     this.announce('SECTOR CLEAR!', '#00e676');
     this.synth.playCardDraw();
-    this.time.delayedCall(1600, () => this.options.onGameOver(stars));
+    this.time.delayedCall(1600, () => this.options.onGameOver(stars, true));
   }
 
   private cellX(col: number): number {
@@ -342,15 +345,6 @@ export default class SpaceGridScene extends Phaser.Scene {
         alpha: { start: 0.12, end: 0 },
         blendMode: 'ADD',
       }).setDepth(-3);
-
-      // Drone-barrier gate at the lane's left (base side) only. Right side is the asteroid entry. Decorative.
-      const leftDrone = this.add.image(this.playLeft + 6, y, 'droneBarrier')
-        .setDisplaySize(this.tileH * 0.5, this.tileH * 0.5).setAlpha(0.85).setDepth(-4);
-      // Gentle hover bob so the drone reads as airborne.
-      this.tweens.add({
-        targets: leftDrone, y: y + Phaser.Math.Between(4, 8),
-        duration: Phaser.Math.Between(1100, 1700), yoyo: true, repeat: -1, ease: 'Sine.inOut'
-      });
     }
   }
 
@@ -359,9 +353,11 @@ export default class SpaceGridScene extends Phaser.Scene {
     // up, add .setAngle(90); if it points left, .setAngle(180).
     const size = Math.min(this.tileW, this.tileH) * 0.8;
     const s = this.add.sprite(x, y, 'turret').setDisplaySize(size, size);
+    s.enableFilters();
+    s.filters?.external.addGlow(0xffffff, 2, 0, 1, false, 3, 6); // thin outline
     this.breathe(s, 0.04, 1600); // idle breathing
     this.launchers.push(s);
-    this.time.addEvent({ delay: 2000, loop: true, callback: () => this.fireProjectile(row, x, y) });
+    this.time.addEvent({ delay: 1000, loop: true, callback: () => this.fireProjectile(row, x, y) });
   }
 
   private plantTexture(op: Modifier['op']): string {
@@ -389,8 +385,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     const idle = obj.getData('idleTween') as Phaser.Tweens.Tween | undefined;
     idle?.pause();
     obj.setScale(base.bx * 1.14, base.by * 0.88);
-    obj.setTint(0xffffff);
-    obj.setTintFill(); // Phaser 4: enable fill-tint mode (color comes from setTint above)
+    obj.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL); // Phaser 4: fill-tint mode
     this.time.delayedCall(60, () => obj.clearTint());
     this.tweens.add({
       targets: obj, scaleX: base.bx, scaleY: base.by,
@@ -446,16 +441,16 @@ export default class SpaceGridScene extends Phaser.Scene {
     proj.setDisplaySize(28, 28); // bigger so the pea reads clearly at 1920 res
     proj.setAngle(90); // static 90deg orientation (no spin)
     proj.setVelocityX(180); // fire rightward toward incoming asteroids
-    proj.setData('damage', 5); // base damage
+    proj.setData('damage', 2); // base damage
     proj.setData('row', row);
     proj.setData('lastCol', 0);
-    proj.setData('expr', '5');
+    proj.setData('expr', '2');
     proj.setData('baseSX', proj.scaleX);
     proj.setData('baseSY', proj.scaleY);
     proj.setData('pScale', 1); // grows +18% per buff, capped
-    this.peaPulse(proj, 5); // brightness throb begins the moment it's shot
+    this.peaPulse(proj, 2); // brightness throb begins the moment it's shot
 
-    const text = this.add.text(x + 20, spawnY - 18, '5', {
+    const text = this.add.text(x + 20, spawnY - 18, '2', {
       fontSize: '16px',
       color: '#00e676',
       fontStyle: 'bold',
@@ -516,9 +511,15 @@ export default class SpaceGridScene extends Phaser.Scene {
     ast.setData('row', row);
     ast.setData('lastCol', this.cols); // for -/ tower pass-through tracking
 
+    // Subtle outline around the drone so the dark rock reads against the dark field.
+    ast.enableFilters();
+    ast.filters?.external.addGlow(0xffffff, 2, 0, 1, false, 3, 6);
+
     const txtStr = shieldFactor > 1 ? `[x${shieldFactor}] ${hp}` : `${hp}`;
-    const text = this.add.text(x, y - 28, txtStr, { fontSize: '15px', color: '#ff3b5c', fontStyle: 'bold' })
-      .setOrigin(0.5);
+    const text = this.add.text(x, y - 28, txtStr, {
+      fontSize: '15px', color: '#ff3b5c', fontStyle: 'bold',
+      stroke: '#ffffff', strokeThickness: 3,
+    }).setOrigin(0.5);
     ast.setData('text', text);
   }
 
@@ -647,7 +648,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.time.paused = true;
     this.announce('BASE DOWN', '#ff3b5c');
     const stars = this.score >= 100 ? 3 : this.score >= 50 ? 2 : 1;
-    this.options.onGameOver(stars);
+    this.options.onGameOver(stars, false);
   }
 
   // Arrow field so it matches Phaser 4's ArcadePhysicsCallback signature (object params are a

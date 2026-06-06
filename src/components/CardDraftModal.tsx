@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { playSfx } from '../audio/sfx';
 
 interface CardDraftModalProps {
   options: string[];
@@ -66,10 +67,10 @@ const CardDraftModal: React.FC<CardDraftModalProps> = ({ options, onSelect }) =>
           return (
             <div
               key={idx}
-              className="card-flip-in aspect-[5/7] cursor-pointer transition-transform duration-200 hover:scale-110 hover:-translate-y-2"
+              className="card-flip-in aspect-5/7 cursor-pointer transition-transform duration-200 hover:scale-110 hover:-translate-y-2"
               style={{ width: 'clamp(140px, 28vw, 180px)', animationDelay: `${idx * 120}ms` }}
               onClick={() => onSelect(card)}
-              onMouseEnter={() => setHoveredCard(card)}
+              onMouseEnter={() => { playSfx('hover'); setHoveredCard(card); }}
               onMouseLeave={() => setHoveredCard(null)}
             >
               {art ? (
@@ -92,7 +93,7 @@ const CardDraftModal: React.FC<CardDraftModalProps> = ({ options, onSelect }) =>
       </div>
 
       {/* Description Area */}
-      <div 
+      <div
         className="mt-10 max-w-lg w-full px-6 py-4 rounded-xl border bg-slate-950/80 backdrop-blur-md text-center transition-all duration-300 min-h-[96px] flex flex-col justify-center items-center"
         style={{
           borderColor: hoveredCard ? `${getCardFamily(hoveredCard).color}40` : 'rgba(0, 255, 255, 0.15)',
@@ -101,9 +102,9 @@ const CardDraftModal: React.FC<CardDraftModalProps> = ({ options, onSelect }) =>
       >
         {hoveredCard ? (
           <div className="space-y-1">
-            <span 
+            <span
               className="text-xs font-black tracking-widest uppercase px-2 py-0.5 rounded border"
-              style={{ 
+              style={{
                 color: getCardFamily(hoveredCard).color,
                 borderColor: `${getCardFamily(hoveredCard).color}30`,
                 backgroundColor: `${getCardFamily(hoveredCard).color}10`

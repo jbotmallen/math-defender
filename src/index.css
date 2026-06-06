@@ -104,3 +104,43 @@
 .animate-score-pop {
   animation: score-pop 750ms cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
 }
+
+/* Results: earned star drops in from above and settles with an overshoot bounce.
+   `backwards` holds the hidden start through the per-star stagger delay. */
+@keyframes star-drop {
+  0% {
+    transform: translateY(-70px) scale(0.3) rotate(-25deg);
+    opacity: 0;
+  }
+  60% {
+    transform: translateY(8px) scale(1.15) rotate(6deg);
+    opacity: 1;
+  }
+  80% {
+    transform: translateY(-3px) scale(0.96) rotate(-2deg);
+  }
+  100% {
+    transform: translateY(0) scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+.animate-star-drop {
+  animation: star-drop 600ms cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+
+/* Results panel itself: fade + scale up on mount. */
+@keyframes results-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.animate-results-in {
+  animation: results-in 320ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
+}

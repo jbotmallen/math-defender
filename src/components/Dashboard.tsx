@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { BookOpen, Maximize2, Minimize2, Settings, Star, Volume2, VolumeX, X, Globe, Moon, Hexagon, Lock } from 'lucide-react';
 import { type AudioSettings } from '../settings';
+import { fadeAudio } from '../audio/fade';
+import { playSfx } from '../audio/sfx';
 
 interface DashboardProps {
   stars: number;
+  maxClearedLevel: number;
   unlockedCards: string[];
   audioSettings: AudioSettings;
   onAudioSettingsChange: (settings: AudioSettings) => void;
@@ -30,8 +33,12 @@ const BACKGROUND_PARTICLES = Array.from({ length: 15 }).map((_, i) => ({
   color: ['#00ffff', '#b829ff', '#3b82f6', '#10b981'][i % 4],
 }));
 
+const BGM_SRC = '/menu_bgm.mp3';
+const BGM_MAX_VOLUME = 0.5; // ceiling so music sits under SFX; scaled by masterVolume
+
 const Dashboard: React.FC<DashboardProps> = ({
   stars,
+  maxClearedLevel,
   audioSettings,
   onAudioSettingsChange,
   onStartLevel,
@@ -39,6 +46,62 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [activePanel, setActivePanel] = useState<'settings' | 'rules' | null>(null);
   const [rulesStep, setRulesStep] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Menu background music: loops with a fade in on mount and fade out on unmount.
+  const bgmRef = useRef<HTMLAudioElement | null>(null);
+  const fadeIdRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Target volume reflecting current settings; kept in a ref so the live-settings
+  // effect can fade toward it without re-creating the element.
+  const targetVolume = audioSettings.muted ? 0 : BGM_MAX_VOLUME * audioSettings.masterVolume;
+  const targetVolumeRef = useRef(targetVolume);
+
+  useEffect(() => {
+    const audio = new Audio(BGM_SRC);
+    audio.loop = true;
+    audio.volume = 0;
+    bgmRef.current = audio;
+
+    const startFadeIn = () => {
+      if (fadeIdRef.current) clearInterval(fadeIdRef.current);
+      fadeIdRef.current = fadeAudio(audio, targetVolumeRef.current, 1200);
+    };
+
+    // Browsers block autoplay until a user gesture; if play() rejects, retry
+    // once on the first interaction.
+    let detachGesture: (() => void) | null = null;
+    const tryPlay = () => {
+      audio.play().then(startFadeIn).catch(() => {
+        const onGesture = () => {
+          audio.play().then(startFadeIn).catch(() => {});
+          detachGesture?.();
+        };
+        window.addEventListener('pointerdown', onGesture, { once: true });
+        window.addEventListener('keydown', onGesture, { once: true });
+        detachGesture = () => {
+          window.removeEventListener('pointerdown', onGesture);
+          window.removeEventListener('keydown', onGesture);
+        };
+      });
+    };
+    tryPlay();
+
+    return () => {
+      detachGesture?.();
+      if (fadeIdRef.current) clearInterval(fadeIdRef.current);
+      // Fade out then release the element (interval holds the ref alive after unmount).
+      fadeAudio(audio, 0, 700, true);
+      bgmRef.current = null;
+    };
+  }, []);
+
+  // React to live mute / master-volume changes by fading to the new target.
+  useEffect(() => {
+    targetVolumeRef.current = targetVolume;
+    const audio = bgmRef.current;
+    if (!audio || audio.paused) return;
+    if (fadeIdRef.current) clearInterval(fadeIdRef.current);
+    fadeIdRef.current = fadeAudio(audio, targetVolume, 350);
+  }, [targetVolume]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -103,7 +166,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       subtitle: 'Void Expanse',
       themeColor: '#b829ff', // Purple
       icon: <Moon className="text-[#b829ff] drop-shadow-[0_0_5px_#b829ff]" size={40} />,
-      locked: stars < 10,
+      locked: maxClearedLevel < 1,
       starsCollected: 0,
       maxStars: 30,
     },
@@ -113,7 +176,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       subtitle: 'Singularity Core',
       themeColor: '#3b82f6', // Blue
       icon: <Hexagon className="text-[#3b82f6] drop-shadow-[0_0_5px_#3b82f6]" size={40} />,
-      locked: stars < 20,
+      locked: maxClearedLevel < 2,
       starsCollected: 0,
       maxStars: 30,
     },
@@ -241,7 +304,7 @@ const Dashboard: React.FC<DashboardProps> = ({
 
         {/* Absolute Settings Button */}
         <button
-          onClick={() => setActivePanel('settings')}
+          onClick={() => { playSfx('click'); setActivePanel('settings'); }}
           className="absolute top-4 right-4 z-10 flex flex-col items-center group cursor-pointer"
         >
           <div className="w-10 h-10 md:w-12 md:h-12 bg-slate-900/80 border-2 border-[#00ffff]/30 rounded-lg flex justify-center items-center group-hover:border-[#00ffff] group-hover:shadow-[0_0_15px_rgba(0,255,255,0.4)] transition-all">
@@ -323,8 +386,15 @@ const Dashboard: React.FC<DashboardProps> = ({
 
               {/* Deploy Button */}
               <button
-                onClick={() => !sector.locked && onStartLevel(sector.level)}
-                disabled={sector.locked}
+                onClick={() => {
+                  if (sector.locked) {
+                    playSfx('error');
+                    return;
+                  }
+                  playSfx('confirm');
+                  onStartLevel(sector.level);
+                }}
+                aria-disabled={sector.locked}
                 className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 px-6 py-3 rounded border border-white/20 bg-black/40 font-bold uppercase tracking-widest transition-all"
                 style={{
                   boxShadow: sector.locked ? 'none' : `inset 0 0 10px ${sector.themeColor}40`,
@@ -332,6 +402,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 }}
                 onMouseOver={(e) => {
                   if (!sector.locked) {
+                    playSfx('hover');
                     e.currentTarget.style.backgroundColor = sector.themeColor;
                     e.currentTarget.style.boxShadow = `0 0 20px ${sector.themeColor}`;
                     e.currentTarget.style.color = '#000';
@@ -354,7 +425,7 @@ const Dashboard: React.FC<DashboardProps> = ({
         {/* HOW TO PLAY button */}
         <div className="max-w-2xl mx-auto w-full px-4 mt-4">
           <button
-            onClick={() => { setActivePanel('rules'); setRulesStep(0); }}
+            onClick={() => { playSfx('click'); setActivePanel('rules'); setRulesStep(0); }}
             className="w-full py-4 bg-slate-900/80 hover:bg-[#00ffff]/10 border-2 border-dashed border-[#00ffff]/30 hover:border-[#00ffff] rounded-xl flex items-center justify-center gap-3 group transition-all hover:shadow-[0_0_20px_rgba(0,255,255,0.2)] text-base font-bold uppercase tracking-widest text-[#00ffff] cursor-pointer"
           >
             <BookOpen className="text-[#00ffff]" size={20} />
@@ -390,7 +461,7 @@ const Dashboard: React.FC<DashboardProps> = ({
               </h2>
               <button
                 className="grid h-9 w-9 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-200 transition hover:border-red-500 hover:text-red-500"
-                onClick={() => setActivePanel(null)}
+                onClick={() => { playSfx('back'); setActivePanel(null); }}
               >
                 <X size={18} />
               </button>
@@ -401,14 +472,14 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     className="flex flex-col items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 py-4 text-sm font-bold text-slate-100 transition hover:border-[#00ffff]/60 hover:text-[#00ffff]"
-                    onClick={() => updateAudioSetting('muted', !audioSettings.muted)}
+                    onClick={() => { playSfx('toggle'); updateAudioSetting('muted', !audioSettings.muted); }}
                   >
                     {audioSettings.muted ? <VolumeX size={24} className="text-red-400" /> : <Volume2 size={24} />}
                     {audioSettings.muted ? 'AUDIO OFF' : 'AUDIO ON'}
                   </button>
                   <button
                     className="flex flex-col items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 py-4 text-sm font-bold text-slate-100 transition hover:border-[#00ffff]/60 hover:text-[#00ffff]"
-                    onClick={toggleFullscreen}
+                    onClick={() => { playSfx('toggle'); toggleFullscreen(); }}
                   >
                     {isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />}
                     {isFullscreen ? 'WINDOWED' : 'FULLSCREEN'}
@@ -437,7 +508,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                       <path d="M40 78 L32 88 M60 78 L68 88 M50 78 L50 90" strokeWidth="2" strokeOpacity="0.7" />
                       <line x1="10" y1="50" x2="90" y2="50" stroke="#b829ff" strokeWidth="1" strokeDasharray="3 3" className="animate-pulse" />
                     </svg>
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#00ffff]/20 via-transparent to-transparent pointer-events-none"></div>
+                    <div className="absolute inset-0 bg-linear-to-t from-[#00ffff]/20 via-transparent to-transparent pointer-events-none"></div>
                     <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#00ffff] rounded-full animate-ping"></div>
                     <div className="absolute top-1 right-1 w-2.5 h-2.5 bg-[#00ffff] rounded-full"></div>
                   </div>
@@ -464,7 +535,7 @@ const Dashboard: React.FC<DashboardProps> = ({
                 <div className="flex items-center justify-between pt-4 border-t border-white/10">
                   <button
                     disabled={rulesStep === 0}
-                    onClick={() => setRulesStep(rulesStep - 1)}
+                    onClick={() => { playSfx('back'); setRulesStep(rulesStep - 1); }}
                     className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded border border-white/20 hover:border-white/40 text-slate-300 disabled:opacity-40 disabled:pointer-events-none transition-colors"
                   >
                     Back
@@ -482,14 +553,14 @@ const Dashboard: React.FC<DashboardProps> = ({
 
                   {rulesStep < rulesSteps.length - 1 ? (
                     <button
-                      onClick={() => setRulesStep(rulesStep + 1)}
+                      onClick={() => { playSfx('click'); setRulesStep(rulesStep + 1); }}
                       className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded border border-[#00ffff]/40 hover:border-[#00ffff] text-[#00ffff] bg-[#00ffff]/10 hover:bg-[#00ffff]/20 transition-all hover:shadow-[0_0_10px_rgba(0,255,255,0.2)]"
                     >
                       Next
                     </button>
                   ) : (
                     <button
-                      onClick={() => setActivePanel(null)}
+                      onClick={() => { playSfx('confirm'); setActivePanel(null); }}
                       className="px-4 py-2 text-xs font-bold uppercase tracking-wider rounded border border-emerald-500/40 hover:border-emerald-500 text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 transition-all hover:shadow-[0_0_10px_rgba(16,185,129,0.2)]"
                     >
                       Finish
