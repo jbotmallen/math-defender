@@ -382,9 +382,8 @@ const Dashboard: React.FC<DashboardProps> = ({
       {/* Settings / Rules Modals */}
       {activePanel && (
         <div className="absolute inset-0 z-50 grid place-items-center bg-black/80 backdrop-blur-md">
-          <div className={`glass-panel w-[95%] p-5 sm:p-8 shadow-[0_0_40px_rgba(0,255,255,0.15)] transition-all ${
-            activePanel === 'settings' ? 'max-w-xl' : 'max-w-3xl'
-          }`}>
+          <div className={`glass-panel w-[95%] p-5 sm:p-8 shadow-[0_0_40px_rgba(0,255,255,0.15)] transition-all ${activePanel === 'settings' ? 'max-w-xl' : 'max-w-3xl'
+            }`}>
             <div className="mb-6 flex items-center justify-between border-b border-white/10 pb-4">
               <h2 className="text-xl sm:text-2xl font-black text-[#00ffff] uppercase tracking-widest">
                 {activePanel === 'settings' ? 'System Settings' : 'Combat Guide'}
@@ -475,9 +474,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                     {rulesSteps.map((_, idx) => (
                       <div
                         key={idx}
-                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
-                          idx === rulesStep ? 'bg-[#00ffff] scale-110 shadow-[0_0_8px_#00ffff]' : 'bg-slate-700'
-                        }`}
+                        className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${idx === rulesStep ? 'bg-[#00ffff] scale-110 shadow-[0_0_8px_#00ffff]' : 'bg-slate-700'
+                          }`}
                       />
                     ))}
                   </div>

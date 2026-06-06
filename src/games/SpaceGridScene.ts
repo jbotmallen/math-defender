@@ -53,6 +53,7 @@ export default class SpaceGridScene extends Phaser.Scene {
   private readonly normalWaves: number = 3;
   private wave: number = 0;            // current wave (1..normalWaves, then normalWaves+1 = final)
   private toSpawn: number = 0;         // asteroids left to spawn in the current wave
+  private spawnQueue: number[] = [];   // pre-planned lane (row) per spawn; guarantees lane coverage
   private spawnEvent?: Phaser.Time.TimerEvent;
   private awaitingFinal: boolean = false; // wave 3 done; holding final until field clears
   private finalWave: boolean = false;
@@ -155,10 +156,6 @@ export default class SpaceGridScene extends Phaser.Scene {
       this.synth.close();
     });
 
-    // Starter plants in row 0 for visual demo: 5 -> +3 -> *2.
-    this.addModifier(1, 0, { op: '+', val: 3, type: 'ADD_3' });
-    this.addModifier(2, 0, { op: '*', val: 2, type: 'MUL_2' });
-
     // Launch the first wave after a brief beat so the player can read the board.
     this.time.delayedCall(1200, () => this.startWave(1));
   }
@@ -173,7 +170,8 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.wave = n;
     this.finalWave = n > this.normalWaves;
     const cfg = this.waveConfig(n);
-    this.toSpawn = cfg.count;
+    this.spawnQueue = this.buildSpawnQueue(cfg.count);
+    this.toSpawn = this.spawnQueue.length;
 
     this.waveLabel.setText(this.finalWave ? 'FINAL WAVE' : `Wave ${n} / ${this.normalWaves}`)
       .setColor(this.finalWave ? '#ff3b5c' : '#22d3ee');
@@ -184,15 +182,33 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.spawnEvent = this.time.addEvent({ delay: cfg.interval, loop: true, callback: this.waveTick, callbackScope: this });
   }
 
+  // Plan one lane per spawn so every active lane gets >=1 asteroid: seed a shuffled
+  // one-per-lane block first, fill the remainder with random lanes, then shuffle the
+  // whole order so guaranteed spawns aren't all front-loaded. When count < lanes only
+  // a subset is covered that wave (the rest still arrive in following waves).
+  private buildSpawnQueue(count: number): number[] {
+    const lanes: number[] = [];
+    for (let r = 0; r < this.rows; r++) lanes.push(r);
+    Phaser.Utils.Array.Shuffle(lanes);
+
+    const queue: number[] = [];
+    for (let i = 0; i < this.rows && queue.length < count; i++) queue.push(lanes[i]);
+    while (queue.length < count) queue.push(Phaser.Math.Between(0, this.rows - 1));
+
+    Phaser.Utils.Array.Shuffle(queue);
+    return queue;
+  }
+
   private waveTick() {
     if (this.isDrafting) return; // clock is paused during draft, but guard anyway
-    if (this.toSpawn <= 0) {
+    const row = this.spawnQueue.shift();
+    if (row === undefined) {
       this.spawnEvent?.remove();
       this.spawnEvent = undefined;
       this.onWaveSpawned();
       return;
     }
-    this.spawnAsteroid();
+    this.spawnAsteroid(row);
     this.toSpawn--;
   }
 
@@ -395,15 +411,30 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.plantSprites.set(`${col},${row}`, plant);
     this.breathe(plant, 0.03, 1800); // idle pulse
     // Operator + value label so the magnitude (e.g. +3, x2) stays readable over the art.
-    this.add.text(x, y + this.tileH * 0.2, `${mod.op}${mod.val}`,
+    const displayOp = mod.op === '*' ? 'x' : mod.op;
+    this.add.text(x, y + this.tileH * 0.2, `${displayOp}${mod.val}`,
       { fontSize: '18px', color: '#ffffff', fontStyle: 'bold' })
       .setOrigin(0.5).setDepth(-1)
       .setShadow(0, 0, '#000000', 4, true, true);
   }
 
-  // Spin rate climbs with damage so a heavily-buffed pea visibly whirls faster.
-  private peaSpin(dmg: number): number {
-    return Phaser.Math.Clamp(120 + dmg * 12, 120, 600);
+  // Brightness throb: pea yoyos a white tint between dim-blue and full white. Damage
+  // ramps the pulse (faster + deeper swing) so a heavily-buffed pea visibly glows harder.
+  // Replaces the old spin. Self-cleans when the pea is destroyed (active guard).
+  private peaPulse(proj: Phaser.Physics.Arcade.Sprite, dmg: number) {
+    (proj.getData('pulseTween') as Phaser.Tweens.Tween | undefined)?.remove();
+    const dur = Phaser.Math.Clamp(420 - dmg * 8, 120, 420);
+    const dim = Phaser.Math.Clamp(0.55 - dmg * 0.012, 0.2, 0.55);
+    const lo = Math.round(255 * dim);
+    const tw = this.tweens.addCounter({
+      from: lo, to: 255, duration: dur, yoyo: true, loop: -1, ease: 'Sine.inOut',
+      onUpdate: (t) => {
+        if (!proj.active) { t.remove(); return; }
+        const v = Math.round(t.getValue() ?? 255);
+        proj.setTint(Phaser.Display.Color.GetColor(v, v, 255));
+      },
+    });
+    proj.setData('pulseTween', tw);
   }
 
   fireProjectile(row: number, x: number, y: number) {
@@ -412,9 +443,9 @@ export default class SpaceGridScene extends Phaser.Scene {
     // Spawn at the muzzle: the cannon's barrels sit above the lane center.
     const spawnY = y - this.tileH * 0.12;
     const proj = this.projectiles.create(x + 20, spawnY, 'projectile') as Phaser.Physics.Arcade.Sprite;
-    proj.setDisplaySize(16, 16);
+    proj.setDisplaySize(28, 28); // bigger so the pea reads clearly at 1920 res
+    proj.setAngle(90); // static 90deg orientation (no spin)
     proj.setVelocityX(180); // fire rightward toward incoming asteroids
-    proj.setAngularVelocity(this.peaSpin(5)); // spins; faster as it gets buffed
     proj.setData('damage', 5); // base damage
     proj.setData('row', row);
     proj.setData('lastCol', 0);
@@ -422,18 +453,34 @@ export default class SpaceGridScene extends Phaser.Scene {
     proj.setData('baseSX', proj.scaleX);
     proj.setData('baseSY', proj.scaleY);
     proj.setData('pScale', 1); // grows +18% per buff, capped
+    this.peaPulse(proj, 5); // brightness throb begins the moment it's shot
 
-    const text = this.add.text(x + 20, spawnY - 18, '5', { fontSize: '13px', color: '#00e676' }).setOrigin(0.5);
+    const text = this.add.text(x + 20, spawnY - 18, '5', {
+      fontSize: '16px',
+      color: '#00e676',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 3
+    }).setOrigin(0.5);
     proj.setData('text', text);
 
     this.synth.playLaser();
     this.ping(this.launchers[row]); // fire-recoil squish + brightness ping
   }
 
-  spawnAsteroid() {
+  // Map an asteroid's HP onto a 0.75..1.25 size multiplier (bigger = tougher). Bounds
+  // are the per-level HP spread used below so the full range maps across the scale band.
+  private hpScaleFactor(hp: number): number {
+    let lo = 15, hi = 30;                                   // L1: 5..10 * 3
+    if (this.options.level === 2) { lo = 30; hi = 90; }     // L2: 10..30 * 3
+    else if (this.options.level === 3) { lo = 4; hi = 24; } // L3: shield(2..4) * (2..6)
+    const t = Phaser.Math.Clamp((hp - lo) / (hi - lo), 0, 1);
+    return 0.75 + t * 0.5;
+  }
+
+  spawnAsteroid(row: number) {
     if (this.isDrafting) return;
 
-    const row = Phaser.Math.Between(0, this.rows - 1);
     const y = this.cellY(row);
     const x = this.scale.width - 20;
 
@@ -458,8 +505,9 @@ export default class SpaceGridScene extends Phaser.Scene {
     if (shieldFactor === 1) hp *= 3;
 
     ast.setTexture(shieldFactor > 1 ? 'asteroidShield' : 'asteroid');
-    // Spawn as big as the lane itself; SUB/DIV plants literally shrink this scale.
-    const droneSize = this.tileH * 0.92;
+    // Spawn size scales with HP (tougher = bigger) within +/-25% of the lane baseline;
+    // SUB/DIV plants literally shrink this scale further as the drone passes through.
+    const droneSize = this.tileH * 0.7 * this.hpScaleFactor(hp);
     ast.setDisplaySize(droneSize, droneSize);
     ast.setData('baseSize', droneSize);
     ast.setData('scaleF', 1);
@@ -510,18 +558,19 @@ export default class SpaceGridScene extends Phaser.Scene {
           if (mod.op === '+') dmg += mod.val;
           if (mod.op === '*') { dmg *= mod.val; expr = `(${expr})`; }
 
-          expr += ` ${mod.op} ${mod.val}`;
+          const displayOp = mod.op === '*' ? 'x' : mod.op;
+          expr += ` ${displayOp} ${mod.val}`;
           proj.setData('damage', dmg);
           proj.setData('expr', expr);
           text.setText(`${expr} = ${dmg}`);
 
-          // Pea grows (capped) and spins faster the bigger its damage gets.
+          // Pea grows (capped) and pulses brighter/faster the bigger its damage gets.
           const pScale = Math.min((proj.getData('pScale') as number) * 1.18, 2.4);
           proj.setData('pScale', pScale);
           const bsx = proj.getData('baseSX') as number;
           const bsy = proj.getData('baseSY') as number;
           this.tweens.add({ targets: proj, scaleX: bsx * pScale, scaleY: bsy * pScale, duration: 150, ease: 'Back.out' });
-          proj.setAngularVelocity(this.peaSpin(dmg));
+          this.peaPulse(proj, dmg);
 
           const ps = this.plantSprites.get(`${col},${row}`);
           if (ps) this.ping(ps); // platform reacts as the pea activates it
@@ -626,6 +675,41 @@ export default class SpaceGridScene extends Phaser.Scene {
     hp -= dmg;
     this.synth.playExplosion();
 
+    // Combat damage popup at the bottom-right of the asteroid: pop in and fade scale out
+    const offset = ast.displayWidth * 0.35;
+    const startX = ast.x + offset;
+    const startY = ast.y + offset;
+    const dmgText = this.add.text(startX, startY, `-${dmg}`, {
+      fontSize: '22px',
+      color: '#ffeb3b',
+      fontStyle: 'bold',
+      stroke: '#000000',
+      strokeThickness: 5
+    }).setOrigin(0.5).setScale(0.1);
+
+    this.tweens.add({
+      targets: dmgText,
+      x: startX + 15,
+      y: startY - 35,
+      scaleX: 1.3,
+      scaleY: 1.3,
+      duration: 180,
+      ease: 'Back.out',
+      onComplete: () => {
+        this.tweens.add({
+          targets: dmgText,
+          x: startX + 25,
+          y: startY - 60,
+          scaleX: 0.7,
+          scaleY: 0.7,
+          alpha: 0,
+          duration: 400,
+          ease: 'Quad.easeIn',
+          onComplete: () => dmgText.destroy()
+        });
+      }
+    });
+
     const pText = proj.getData('text') as Phaser.GameObjects.Text;
     pText.destroy();
     proj.destroy();
@@ -655,7 +739,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.time.paused = true; // freezes wave spawn + launcher timers during draft
     this.synth.playCardDraw();
 
-    const pool = ['ADD_2', 'MUL_3', 'SUB_1', 'FRAC_HALF'];
+    const pool = ['ADD_3', 'MUL_2', 'SUB_2', 'FRAC_HALF'];
     const options = [
       pool[Phaser.Math.Between(0, pool.length - 1)],
       pool[Phaser.Math.Between(0, pool.length - 1)],
@@ -676,7 +760,8 @@ export default class SpaceGridScene extends Phaser.Scene {
     if (card === 'FRAC_HALF') { op = '/'; val = 2; }
 
     this.pending = { op, val, type: card };
-    this.hintText.setText(`Tap a tile to plant  ${op}${val}`).setVisible(true);
+    const displayOp = op === '*' ? 'x' : op;
+    this.hintText.setText(`Tap a tile to plant  ${displayOp}${val}`).setVisible(true);
     this.enterPlacementMode();
   }
 

@@ -11,7 +11,7 @@ function App() {
   const [stars, setStars] = useState<number>(0);
   const [audioSettings, setAudioSettings] = useState<AudioSettings>(defaultAudioSettings);
   // TODO: spec calls for spending stars to unlock cards into the draft pool.
-  const [unlockedCards] = useState<string[]>(['ADD_1', 'ADD_2', 'SUB_1']);
+  const [unlockedCards] = useState<string[]>(['ADD_1', 'ADD_2', 'SUB_2']);
 
   const handleStartLevel = useCallback((level: number) => {
     setSelectedLevel(level);
