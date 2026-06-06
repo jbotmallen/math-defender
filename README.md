@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./public/og_image.png" alt="Math Defenders" width="100%" />
+
 # 🛡️ Math Defenders
 
 **A landscape, mobile-friendly math tower-defense for grades 3–5.**
@@ -77,6 +79,25 @@ core mechanic instead of a quiz bolted onto a game.
 - **Audio** — every SFX (laser, explosion, deflect, draft, UI) is **synthesized at runtime** via the
   Web Audio API. No audio binaries. Volume/mute is configurable in Settings.
 - **Stars** — clearing a sector awards stars based on remaining base HP.
+
+## Feel & polish (juice)
+
+- **Living cannons** — launchers idle-breathe and squish + brightness-ping on every shot.
+- **Reactive platforms** — operator plants pulse at rest and pop + flash the instant a pea (or drone)
+  activates them.
+- **Growing shots** — a pea grows (+18% per buff, capped) and **spins faster** the bigger its damage
+  gets; it fires from the barrel line, not the lane center.
+- **Drifting drones** — each asteroid lazily rotates at a random rate/direction as it advances, and
+  visibly shrinks when hit by a `−` / `÷` plant.
+- **Placement UX** — drafting a card highlights plantable tiles with a glowing ring + a translucent
+  blueprint **ghost** that follows your cursor before you commit.
+- **Animated draft** — the card overlay flips cards in with a staggered reveal; cards use
+  responsive sizing.
+- **Atmosphere** — a parallax galaxy/nebula backdrop, per-lane flow streaks, and barrier-drone decor.
+- **Wave banners** — pop-in `Wave n` / `FINAL WAVE!` / `SECTOR CLEAR!` announcements.
+- **Settings** — in-game volume sliders, mute, and fullscreen toggle.
+- **Responsive shell** — full-width landscape on desktop; small portrait screens get a rotate prompt.
+- **Social embeds** — Open Graph / Twitter card metadata with a share image.
 
 ## Tech stack
 

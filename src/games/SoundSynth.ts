@@ -122,6 +122,34 @@ export class SoundSynth {
     osc.stop(now + 0.15);
   }
 
+  /** Bright two-note "ready to plant" ping (rising bell). */
+  public playPing() {
+    if (!this.ctx) return;
+    const volume = this.getChannelVolume('effects');
+    if (volume <= 0) return;
+    this.resume();
+
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+
+    const now = this.ctx.currentTime;
+
+    // Rising perfect-fifth chime: A5 -> E6
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1318.5, now + 0.12);
+
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.18 * volume, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+
+    osc.start(now);
+    osc.stop(now + 0.35);
+  }
+
   public playError() {
     if (!this.ctx) return;
     const volume = this.getChannelVolume('alerts');

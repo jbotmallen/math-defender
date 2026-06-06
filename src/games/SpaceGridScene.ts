@@ -29,6 +29,7 @@ export default class SpaceGridScene extends Phaser.Scene {
   private launchers: Phaser.GameObjects.Sprite[] = [];
   private modifiers: Map<string, Modifier> = new Map();        // key: 'col,row'
   private tiles: Map<string, Phaser.GameObjects.Image> = new Map();
+  private plantSprites: Map<string, Phaser.GameObjects.Image> = new Map(); // for activation ping
   // Definite-assignment: created in create(), which Phaser guarantees runs before update()/overlap callbacks.
   private projectiles!: Phaser.Physics.Arcade.Group;
   private asteroids!: Phaser.Physics.Arcade.Group;
@@ -39,6 +40,13 @@ export default class SpaceGridScene extends Phaser.Scene {
   private hintText!: Phaser.GameObjects.Text;
   private isDrafting: boolean = false;
   private pending: Modifier | null = null; // card awaiting tile placement
+
+  // Placement-mode visuals: glowing ring overlays + tile pulse while a card waits to be planted,
+  // plus a translucent blueprint ghost that tracks the hovered tile.
+  private placeRings: Phaser.GameObjects.Arc[] = [];
+  private tilePulseTween?: Phaser.Tweens.Tween;
+  private ringPulseTween?: Phaser.Tweens.Tween;
+  private hoverGhost?: Phaser.GameObjects.Image;
 
   // PvZ-style wave system: 3 timed normal waves, then a final swarm that only
   // launches once the field is clear (hybrid). Clearing the final wave = win.
@@ -113,10 +121,8 @@ export default class SpaceGridScene extends Phaser.Scene {
           // Field tile: tappable target for placing a drafted plant.
           tile.setInteractive();
           tile.on('pointerdown', () => this.tryPlace(c, r));
-          tile.on('pointerover', () => {
-            if (this.pending && !this.modifiers.has(`${c},${r}`)) tile.setAlpha(0.4);
-          });
-          tile.on('pointerout', () => tile.setAlpha(0.18));
+          tile.on('pointerover', () => this.showHoverGhost(c, r));
+          tile.on('pointerout', () => this.hideHoverGhost());
         }
       }
     }
@@ -337,6 +343,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     // up, add .setAngle(90); if it points left, .setAngle(180).
     const size = Math.min(this.tileW, this.tileH) * 0.8;
     const s = this.add.sprite(x, y, 'turret').setDisplaySize(size, size);
+    this.breathe(s, 0.04, 1600); // idle breathing
     this.launchers.push(s);
     this.time.addEvent({ delay: 2000, loop: true, callback: () => this.fireProjectile(row, x, y) });
   }
@@ -345,15 +352,48 @@ export default class SpaceGridScene extends Phaser.Scene {
     return op === '+' ? 'plantAdd' : op === '-' ? 'plantSub' : op === '*' ? 'plantMul' : 'plantDiv';
   }
 
+  // Continuous subtle "breathing": a slow scale yoyo around the object's base scale.
+  private breathe(obj: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image, amp = 0.035, dur = 1500) {
+    const bx = obj.scaleX;
+    const by = obj.scaleY;
+    obj.setData('bScale', { bx, by });
+    const t = this.tweens.add({
+      targets: obj, scaleX: bx * (1 + amp), scaleY: by * (1 + amp),
+      duration: dur, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+    obj.setData('idleTween', t);
+  }
+
+  // One-shot "ping": squish (wide + short) + white brightness flash, then ease back.
+  // Pauses the idle breathe so the two don't fight over scale.
+  private ping(obj: Phaser.GameObjects.Sprite | Phaser.GameObjects.Image) {
+    const base = obj.getData('bScale') as { bx: number; by: number } | undefined;
+    if (!base || obj.getData('pinging')) return;
+    obj.setData('pinging', true);
+    const idle = obj.getData('idleTween') as Phaser.Tweens.Tween | undefined;
+    idle?.pause();
+    obj.setScale(base.bx * 1.14, base.by * 0.88);
+    obj.setTint(0xffffff);
+    obj.setTintFill(); // Phaser 4: enable fill-tint mode (color comes from setTint above)
+    this.time.delayedCall(60, () => obj.clearTint());
+    this.tweens.add({
+      targets: obj, scaleX: base.bx, scaleY: base.by,
+      duration: 200, ease: 'Back.out',
+      onComplete: () => { idle?.resume(); obj.setData('pinging', false); },
+    });
+  }
+
   private addModifier(col: number, row: number, mod: Modifier) {
     this.modifiers.set(`${col},${row}`, mod);
     const x = this.cellX(col);
     const y = this.cellY(row);
     // Custom platform art per operator; square so the PNG never stretches.
     const plantSize = Math.min(this.tileW, this.tileH) * 0.9;
-    this.add.image(x, y, this.plantTexture(mod.op))
+    const plant = this.add.image(x, y, this.plantTexture(mod.op))
       .setDisplaySize(plantSize, plantSize)
       .setDepth(-2);
+    this.plantSprites.set(`${col},${row}`, plant);
+    this.breathe(plant, 0.03, 1800); // idle pulse
     // Operator + value label so the magnitude (e.g. +3, x2) stays readable over the art.
     this.add.text(x, y + this.tileH * 0.2, `${mod.op}${mod.val}`,
       { fontSize: '18px', color: '#ffffff', fontStyle: 'bold' })
@@ -361,21 +401,33 @@ export default class SpaceGridScene extends Phaser.Scene {
       .setShadow(0, 0, '#000000', 4, true, true);
   }
 
+  // Spin rate climbs with damage so a heavily-buffed pea visibly whirls faster.
+  private peaSpin(dmg: number): number {
+    return Phaser.Math.Clamp(120 + dmg * 12, 120, 600);
+  }
+
   fireProjectile(row: number, x: number, y: number) {
     if (this.isDrafting) return;
 
-    const proj = this.projectiles.create(x + 20, y, 'projectile') as Phaser.Physics.Arcade.Sprite;
+    // Spawn at the muzzle: the cannon's barrels sit above the lane center.
+    const spawnY = y - this.tileH * 0.12;
+    const proj = this.projectiles.create(x + 20, spawnY, 'projectile') as Phaser.Physics.Arcade.Sprite;
     proj.setDisplaySize(16, 16);
     proj.setVelocityX(180); // fire rightward toward incoming asteroids
+    proj.setAngularVelocity(this.peaSpin(5)); // spins; faster as it gets buffed
     proj.setData('damage', 5); // base damage
     proj.setData('row', row);
     proj.setData('lastCol', 0);
     proj.setData('expr', '5');
+    proj.setData('baseSX', proj.scaleX);
+    proj.setData('baseSY', proj.scaleY);
+    proj.setData('pScale', 1); // grows +18% per buff, capped
 
-    const text = this.add.text(x + 20, y - 18, '5', { fontSize: '13px', color: '#00e676' }).setOrigin(0.5);
+    const text = this.add.text(x + 20, spawnY - 18, '5', { fontSize: '13px', color: '#00e676' }).setOrigin(0.5);
     proj.setData('text', text);
 
     this.synth.playLaser();
+    this.ping(this.launchers[row]); // fire-recoil squish + brightness ping
   }
 
   spawnAsteroid() {
@@ -388,6 +440,8 @@ export default class SpaceGridScene extends Phaser.Scene {
     const ast = this.asteroids.create(x, y, 'asteroid') as Phaser.Physics.Arcade.Sprite;
     // Slow drift toward base; the final swarm comes in a touch faster for tension.
     ast.setVelocityX(this.finalWave ? -28 : -20);
+    // Lazy spin: random direction + rate per drone.
+    ast.setAngularVelocity(Phaser.Math.Between(8, 20) * (Phaser.Math.Between(0, 1) ? 1 : -1));
 
     let hp = 10;
     let shieldFactor = 1;
@@ -460,6 +514,17 @@ export default class SpaceGridScene extends Phaser.Scene {
           proj.setData('damage', dmg);
           proj.setData('expr', expr);
           text.setText(`${expr} = ${dmg}`);
+
+          // Pea grows (capped) and spins faster the bigger its damage gets.
+          const pScale = Math.min((proj.getData('pScale') as number) * 1.18, 2.4);
+          proj.setData('pScale', pScale);
+          const bsx = proj.getData('baseSX') as number;
+          const bsy = proj.getData('baseSY') as number;
+          this.tweens.add({ targets: proj, scaleX: bsx * pScale, scaleY: bsy * pScale, duration: 150, ease: 'Back.out' });
+          proj.setAngularVelocity(this.peaSpin(dmg));
+
+          const ps = this.plantSprites.get(`${col},${row}`);
+          if (ps) this.ping(ps); // platform reacts as the pea activates it
         }
       }
 
@@ -487,6 +552,8 @@ export default class SpaceGridScene extends Phaser.Scene {
           if (mod.op === '-') hp -= mod.val;
           if (mod.op === '/') hp = Math.floor(hp / mod.val);
           this.synth.playExplosion();
+          const ps = this.plantSprites.get(`${aCol},${aRow}`);
+          if (ps) this.ping(ps); // debuff platform reacts as the drone passes
           if (hp <= 0) {
             text.destroy();
             ast.destroy();
@@ -610,6 +677,80 @@ export default class SpaceGridScene extends Phaser.Scene {
 
     this.pending = { op, val, type: card };
     this.hintText.setText(`Tap a tile to plant  ${op}${val}`).setVisible(true);
+    this.enterPlacementMode();
+  }
+
+  // Highlight every empty placeable tile: spawn a glowing ring overlay + pulse the tiles,
+  // and fire a one-shot "ping" (synth chime + ring pop) so the player knows it's planting time.
+  private enterPlacementMode() {
+    this.exitPlacementMode(); // clear any prior state
+
+    const emptyTiles: Phaser.GameObjects.Image[] = [];
+    const ringR = Math.min(this.tileW, this.tileH) * 0.42;
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 1; c < this.cols; c++) {
+        if (this.modifiers.has(`${c},${r}`)) continue;
+        const tile = this.tiles.get(`${c},${r}`);
+        if (tile) emptyTiles.push(tile);
+        const ring = this.add.circle(this.cellX(c), this.cellY(r), ringR)
+          .setStrokeStyle(2, 0x00e676, 0.9)
+          .setDepth(-3)
+          .setScale(0.5); // pops in via the ping tween below
+        this.placeRings.push(ring);
+      }
+    }
+
+    if (this.placeRings.length === 0) return;
+
+    // Tile glow pulse.
+    this.tilePulseTween = this.tweens.add({
+      targets: emptyTiles, alpha: 0.5,
+      duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+    });
+    // Ring "ping" pop-in, then a continuous breathing pulse.
+    this.tweens.add({
+      targets: this.placeRings, scale: 1, duration: 280, ease: 'Back.out',
+      onComplete: () => {
+        this.ringPulseTween = this.tweens.add({
+          targets: this.placeRings, scale: 1.12, alpha: 0.45,
+          duration: 760, yoyo: true, repeat: -1, ease: 'Sine.inOut',
+        });
+      },
+    });
+    this.synth.playPing();
+  }
+
+  // Tear down placement visuals (rings, pulse tweens, ghost) and reset tile alpha.
+  private exitPlacementMode() {
+    this.tilePulseTween?.stop();
+    this.tilePulseTween = undefined;
+    this.ringPulseTween?.stop();
+    this.ringPulseTween = undefined;
+    this.placeRings.forEach((ring) => ring.destroy());
+    this.placeRings = [];
+    this.hideHoverGhost();
+    // Reset every field tile to its idle alpha.
+    this.tiles.forEach((t) => t.setAlpha(0.18));
+  }
+
+  // Translucent blueprint preview of the pending plant, tinted blue, tracking the hovered tile.
+  private showHoverGhost(col: number, row: number) {
+    if (!this.pending) return;
+    if (this.modifiers.has(`${col},${row}`)) return; // occupied
+    const x = this.cellX(col);
+    const y = this.cellY(row);
+    const size = Math.min(this.tileW, this.tileH) * 0.9;
+    if (!this.hoverGhost) {
+      this.hoverGhost = this.add.image(x, y, this.plantTexture(this.pending.op))
+        .setDepth(-1).setAlpha(0.55).setTint(0x22d3ee);
+    } else {
+      this.hoverGhost.setTexture(this.plantTexture(this.pending.op)).setVisible(true);
+    }
+    this.hoverGhost.setDisplaySize(size, size).setPosition(x, y);
+  }
+
+  private hideHoverGhost() {
+    this.hoverGhost?.setVisible(false);
   }
 
   private handleAudioSettingsChanged(settings: AudioSettings) {
@@ -623,7 +764,7 @@ export default class SpaceGridScene extends Phaser.Scene {
     this.addModifier(col, row, this.pending);
     this.pending = null;
     this.hintText.setVisible(false);
-    this.tiles.forEach((t) => t.setAlpha(0.18));
+    this.exitPlacementMode();
     this.synth.playCardDraw();
 
     // Resume the wave now that the plant is placed.
