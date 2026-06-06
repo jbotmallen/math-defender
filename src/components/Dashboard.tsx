@@ -256,7 +256,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             MATH
           </h1>
           <h1 className="text-6xl sm:text-7xl font-black italic tracking-widest text-transparent bg-clip-text bg-linear-to-b from-[#b829ff] to-[#4a00e0] drop-shadow-[0_0_15px_rgba(184,41,255,0.6)] -mt-4">
-            DEFENDER
+            DEFENDERS
           </h1>
 
           <div className="mt-4 border border-[#00ffff]/50 rounded px-4 sm:px-6 py-1 bg-[#00ffff]/10 flex items-center gap-3 sm:gap-4 shadow-[0_0_15px_rgba(0,255,255,0.2)] max-w-full">
