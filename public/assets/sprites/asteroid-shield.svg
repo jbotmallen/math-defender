@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <radialGradient id="rock2" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#9aa6b8"/>
+      <stop offset="1" stop-color="#3a4356"/>
+    </radialGradient>
+  </defs>
+  <!-- shield aura -->
+  <circle cx="32" cy="32" r="30" fill="none" stroke="#ff3b5c" stroke-width="2"
+          stroke-dasharray="5 4" opacity="0.85"/>
+  <circle cx="32" cy="32" r="30" fill="#ff3b5c" opacity="0.08"/>
+  <polygon points="32,8 48,15 57,31 51,48 33,57 14,50 7,31 14,15"
+           fill="url(#rock2)" stroke="#5a1320" stroke-width="2"/>
+  <circle cx="26" cy="28" r="4" fill="#2b3344"/>
+  <circle cx="39" cy="38" r="5" fill="#2b3344"/>
+</svg>

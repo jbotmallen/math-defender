@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 280" width="200" height="280">
+  <defs>
+    <linearGradient id="bgf" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d2018"/>
+      <stop offset="1" stop-color="#080b11"/>
+    </linearGradient>
+    <filter id="gf" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="6" y="6" width="188" height="268" rx="16" fill="url(#bgf)"
+        stroke="#00e676" stroke-width="3" filter="url(#gf)"/>
+  <rect x="14" y="14" width="172" height="252" rx="10" fill="none"
+        stroke="#00e676" stroke-width="1" stroke-opacity="0.4"/>
+  <!-- fraction glyph 1/2 -->
+  <g filter="url(#gf)" fill="#9dffc6">
+    <text x="100" y="128" font-family="Arial, sans-serif" font-size="70" font-weight="bold"
+          text-anchor="middle">1</text>
+    <rect x="64" y="138" width="72" height="6" rx="3"/>
+    <text x="100" y="206" font-family="Arial, sans-serif" font-size="70" font-weight="bold"
+          text-anchor="middle">2</text>
+  </g>
+  <text x="100" y="40" font-family="Arial, sans-serif" font-size="18" font-weight="bold"
+        fill="#00e676" text-anchor="middle" letter-spacing="2">FRACTION</text>
+  <text x="100" y="252" font-family="Arial, sans-serif" font-size="12"
+        fill="#94a3b8" text-anchor="middle">halve damage · charges mega-beam</text>
+  <polygon points="172,22 182,30 172,38" fill="#00e676"/>
+</svg>

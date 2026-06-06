@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 280" width="200" height="280">
+  <defs>
+    <linearGradient id="bgm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1030"/>
+      <stop offset="1" stop-color="#080b11"/>
+    </linearGradient>
+    <filter id="gm" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="6" y="6" width="188" height="268" rx="16" fill="url(#bgm)"
+        stroke="#c026ff" stroke-width="3" filter="url(#gm)"/>
+  <rect x="14" y="14" width="172" height="252" rx="10" fill="none"
+        stroke="#c026ff" stroke-width="1" stroke-opacity="0.4"/>
+  <text x="100" y="150" font-family="Arial, sans-serif" font-size="96" font-weight="bold"
+        fill="#e9a6ff" text-anchor="middle" filter="url(#gm)">&#215;2</text>
+  <text x="100" y="40" font-family="Arial, sans-serif" font-size="18" font-weight="bold"
+        fill="#c026ff" text-anchor="middle" letter-spacing="3">MUL</text>
+  <text x="100" y="246" font-family="Arial, sans-serif" font-size="13"
+        fill="#94a3b8" text-anchor="middle">multiply damage &#215;2</text>
+  <text x="170" y="34" font-family="Arial, sans-serif" font-size="12" fill="#c026ff">PEMDAS</text>
+</svg>
